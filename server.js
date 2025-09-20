@@ -5,8 +5,17 @@ const con = require("./con");
 const bcrypt = require("bcryptjs");
 const validator = require("validator");
 
+const AuthenticateToken = require('./utils/auth/authenticate')
+const GenerateAccessToken = require('./utils/auth/generatetoken')
+
 const app = exp();
+
+// Routers  
 const router = exp.Router();
+const financial_router = require('./routes/financial.route')
+const health_insti_router = require('./routes/hospitals.route');
+
+
 app.use(exp.json());
 
 
@@ -50,7 +59,7 @@ router.get("/", (req, res) => {
 
   * The response contains the new access token.
 */
-router.post("/auth/refresh", async (req, res) => {
+router.post("/auth/refresh", AuthenticateToken, async (req, res) => {
   const { refresh_token } = req.body;
 
   if (!refresh_token) return res.sendStatus(401);
@@ -208,7 +217,7 @@ router.post("/auth/login", async (req, res) => {
     }
 
     // Generate JWT tokens
-    const access_token = generateAccessToken(user);
+    const access_token = GenerateAccessToken(user);
     const refresh_token = jwt.sign(user, process.env.REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
 
 
@@ -302,7 +311,7 @@ router.delete("/auth/logout", async (req, res) => {
 
   * The response contains a success message if the token is valid.
 */
-router.get("/dbtest", authenticateToken, async (req, res) => {
+router.get("/dbtest", AuthenticateToken, async (req, res) => {
   try {
     const result = await con.query("SELECT NOW() AS now, 1 + 1 AS sum");
     res.json({
@@ -318,64 +327,11 @@ router.get("/dbtest", authenticateToken, async (req, res) => {
   }
 });
 
-/*
-  Function to generate JWT access token
-  - Uses user info as payload
-  - Signs with ACCESS_TOKEN_SECRET
 
-  * Parameters:
-    user (object): User information to include in the token payload
-
-  * Returns:
-    string: Signed JWT access token
-*/
-function generateAccessToken(user) {
-  return jwt.sign(user, process.env.ACCESS_TOKEN_SECRET);
-}
-
-/*
-  Middleware to authenticate JWT token
-  - Validates the token
-  - Checks if the token is revoked
-
-  * STATUS:
-    401 - Unauthorized (Missing token)
-    403 - Forbidden (Invalid or revoked token)
-    500 - Internal Server Error (Database error)
-
-  * Usage:
-    Add `authenticateToken` as middleware to any route that requires authentication.
-
-  * Example:
-    router.get("/protected", authenticateToken, (req, res) => { ... });
- */ 
-async function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.sendStatus(401);
-
-  try {
-    const payload = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-    delete payload.password; // Remove password from payload if present
-    payload.access_token_id = token; // Add access_token_id to payload
-
-    // Check if the token's access_token_id exists in DB
-    const session = await con.query(
-      'SELECT * FROM sessions WHERE access_token_id = $1',
-      [payload.access_token_id]
-    );
-
-    if (session.rowCount === 0) return res.sendStatus(403); // token revoked
-
-    req.user = payload;
-    next();
-  } catch (err) {
-    return res.sendStatus(403);
-  }
-}
-
-// Mount router first
+// Mounting of routers
 app.use("/v1", router);
+app.use("/v1/healthinsti",health_insti_router);
+app.use("/v1/financial",financial_router);
 
 // Then handle undefined routes
 app.use((req, res) => {
