@@ -3,9 +3,9 @@ import con from "../con.js";
 
 
 /**
- *  TODO: Most of the lines here are generated code, this needs to be refactored.
  * 
- * * SUGGESTION: Consider creating a generic controller function that can handle different entity types to reduce code duplication.
+ * 
+ * * This is also done 
  * 
  */
 export async function get_financial_Insti_list(req, res, next) {
@@ -23,82 +23,95 @@ export async function get_financial_Insti_list(req, res, next) {
 
 /**
  * 
- * TODO: Most of the lines here are generated code, this needs to be refactored. Include related tables such as description and contact details.
- * * SUGGESTION: Use JOINs to fetch related data in a single query.
+ * * This is finished and needs optimization and documentation
+ * 
  */
 export async function get_financial_Insti_info(req, res, next) {
 
     const { id } = req.params;
     try {
         const fiResult = await con.query(`
-        SELECT 	
-            fi.financial_insti_id,
-            fi.financial_insti_name,
-            fi.geo_latitutde,
-            fi.geo_longhitude,
-            prov.province_name,
-            cities.city_name,
-            barangays.brgy_name,
-            Concat_ws(' ',TO_CHAR(ophr.service_start_time,'HH24:MI'), ophr.start_time_type_code) as StartTime,
-            Concat_ws(' ',TO_CHAR(ophr.service_end_time,'HH24:MI'), ophr.end_time_type_code) as CloseTime
-        FROM financial_institution as fi
-        JOIN financial_insti_ophr as ophr on ophr."financial_insti_ID" = fi.financial_insti_id
-        JOIN provinces as prov ON prov.province_code = fi.province_code
-        JOIN cities ON cities.city_zip_code = fi.city_zip_code
-        JOIN barangays ON barangays.brgy_code = fi.brgy_code
-        JOIN program_offers as po on po.financial_insti_id = fi.financial_insti_id
-        WHERE fi.financial_insti_id = $1`, [id]);
-
+            SELECT 	
+                fi.financial_insti_id,
+                fi.financial_insti_name,
+                fi.geo_latitutde,
+                fi.geo_longhitude,
+                prov.province_name,
+                cities.city_name,
+                barangays.brgy_name,
+                Concat_ws(' ',TO_CHAR(ophr.service_start_time,'HH24:MI'), ophr.start_time_type_code) as StartTime,
+                Concat_ws(' ',TO_CHAR(ophr.service_end_time,'HH24:MI'), ophr.end_time_type_code) as CloseTime
+            FROM financial_institution as fi
+            JOIN financial_insti_ophr as ophr on ophr."financial_insti_ID" = fi.financial_insti_id
+            JOIN provinces as prov ON prov.province_code = fi.province_code
+            JOIN cities ON cities.city_zip_code = fi.city_zip_code
+            JOIN barangays ON barangays.brgy_code = fi.brgy_code
+            WHERE fi.financial_insti_id = $1
+        `, [id]);
 
         const fiprogramsResult = await con.query(`
             SELECT 
                 program_id,
                 program_name,
                 program_desc
-            from program_offers
-            WHERE financial_insti_id = $1`, [id]);
+            FROM program_offers
+            WHERE financial_insti_id = $1
+        `, [id]);
 
+        // Build programs array with extra details
+        const programs = [];
+        for (const program of fiprogramsResult.rows) {
+            const [programProceedure, programBenefits, programRequirements] = await Promise.all([
+                con.query(`
+                    SELECT seq_no, program_steps_name, program_steps_desc 
+                    FROM program_offer_steps
+                    WHERE program_id = $1 
+                    ORDER BY seq_no
+                `, [program.program_id]),
+                con.query(`
+                    SELECT program_id, benef_name, benef_desc 
+                    FROM program_benefits
+                    WHERE program_id = $1
+                    ORDER BY benef_id
+                `, [program.program_id]),
+                con.query(`
+                    SELECT program_id, req_name, req_details 
+                    FROM program_requirements
+                    WHERE program_id = $1
+                    ORDER BY program_req_id
+                `, [program.program_id])
+            ]);
 
-        const programID = fiprogramsResult.rows[0].program_id;
+            programs.push({
+                ...program,
+                Requirements: programRequirements.rows,
+                Benefits: programBenefits.rows,
+                Procedure: programProceedure.rows
+            });
+        }
 
-        const programProceedure = await con.query(`
-            SELECT
-                seq_no, 
-                program_steps_name, 
-                program_steps_desc 
-            FROM program_offer_steps
-            where program_id = $1 
-            ORDER BY seq_no` , [programID]);
-        
-        const programBenefits = await con.query(`
-            SELECT 
-                program_id, 
-                benef_name,
-                benef_desc 
-            FROM program_benefits
-            where program_id = $1
-            ORDER BY benef_id`, [programID])
-        
-        const programRequirements = await con.query(`
-            SELECT 
-                program_id,
-                req_name,
-                req_details 
-            FROM public.program_requirements
-            WHERE program_id = $1
-            ORDER BY program_req_id`, [programID])
-
-
-        if (!fiResult || !fiResult.rows || fiResult.rows.length === 0) {
+        if (!fiResult.rows.length) {
             return res.status(404).json({ error: 'Financial Institution not found' });
         }
-        res.json({ ...fiResult.rows[0], "Programs": [{ ...fiprogramsResult.rows[0],"Requiremennts": programRequirements.rows,"Benefits": programBenefits.rows, "Procedure": programProceedure.rows }] }); // send single hospital object back to the client
+
+        res.json({
+            ...fiResult.rows[0],
+            Programs: programs
+        });
     } catch (err) {
         console.error('Error fetching Financial Institution:', err);
         res.status(500).json({ error: 'Failed to fetch Financial Institution' });
     }
 }
 
+/**
+ * 
+ * @param { Details of a financial Institution [name, ophr, programs, etc]} req 
+ * @param {status codes} res 
+ * @returns status code of 201
+ * 
+ * TODO NEXT TASK
+ */
 export async function insert_financial_Insti(req, res, next) {
 
     try {
@@ -128,6 +141,13 @@ export async function insert_financial_Insti(req, res, next) {
     }
 }
 
+/**
+ * 
+ * @param {*} req 
+ * @param {*} res 
+ * @param {*} next 
+ * @returns 
+ */
 export async function update_financial_Insti(req, res, next) {
     const { id } = req.params;
     const { name, geo_latitude, geo_longhitude, city_zip_code, brgy_code, provincial_code, purok_code } = req.body;

@@ -1,5 +1,10 @@
 import con from "../con.js";
 
+/**
+ * 
+ * get the list of the health Institution
+ * 
+ */
 export async function get_hospital_list(req, res, next) {
     try {
         const result = await con.query('SELECT * FROM health_insti ORDER BY health_insti_id ASC');
@@ -12,33 +17,91 @@ export async function get_hospital_list(req, res, next) {
 
 /**
  * 
- * TODO: Include related tables such as description and contact details.
- * * SUGGESTION: Use JOINs to fetch related data in a single query.
+ * * This is finished and needs optimization and requires documentation
  * 
  */
 export async function get_hospital_info(req, res, next) {
 
     const { id } = req.params;
     try {
-        const result =await con.query(`
-        SELECT 	hi.health_insti_id,
+
+        const hiResult = await con.query(`
+        SELECT 
+            hi.health_insti_id,
             hi.health_insti_name,
             prov.province_name,
             cities.city_name,
             barangays.brgy_name,
+            
             Concat_ws(' ',TO_CHAR(ophr.service_start_time,'HH24:MI'), ophr.start_time_type_code) as StartTime,
             Concat_ws(' ',TO_CHAR(ophr.service_end_time,'HH24:MI'), ophr.end_time_type_code) as CloseTime
         FROM health_insti as hi
-        JOIN insti_ophr as ophr on ophr."health_insti_id" = hi.health_insti_id
-        JOIN provinces as prov ON prov.province_code = hi.provincial_code
-        JOIN cities ON cities.city_zip_code = hi.city_zip_code
-        JOIN barangays ON barangays.brgy_code = hi.brgy_code
-        where hi.health_insti_id = $1
+        LEFT JOIN health_insti_ophr as ophr ON ophr.health_insti_id = hi.health_insti_id
+        LEFT JOIN provinces as prov ON prov.province_code = hi.provincial_code
+        LEFT JOIN cities ON cities.city_zip_code = hi.city_zip_code
+        LEFT JOIN barangays ON barangays.brgy_code = hi.brgy_code
+        WHERE hi.health_insti_id = $1
             `, [id])
-            if (!result || !result.rows || result.rows.length === 0) {
+
+
+        const hiServicesResult = await con.query(`
+           SELECT 
+                his.service_id,
+                his.service_name,
+                his.service_desc,
+                Concat_ws(' ',TO_CHAR(hso.service_start_time,'HH24:MI'), hso.start_time_type_code) as StartTime,
+                Concat_ws(' ',TO_CHAR(hso.service_end_time,'HH24:MI'), hso.end_time_type_code) as CloseTime 
+            FROM health_insti_services as his 
+            LEFT JOIN health_service_ophr as hso on hso.service_id = his.service_id
+            WHERE his.health_insti_id =$1
+            `, [id]);
+
+        const hiContactDetailsResults = await con.query(`
+            SELECT 
+                ct.contact_type_name, 
+                hic.contact_detail 
+            FROM health_insti_contacts as hic 
+            JOIN contact_type as ct on ct.contact_type_id = hic.contact_type_id 
+            WHERE hic.health_insti_id = $1`, [id])
+
+        const ServiceID = hiServicesResult.rows[0].service_id;
+
+
+        const hiServicesRequirements = await con.query(`
+            SELECT 
+                sr.req_name,
+                sr.req_desc,
+                sr.service_id
+            FROM service_requirements as sr 
+            WHERE service_id = $1`, [ServiceID])
+        
+        const hiServicesProcedure =  await con.query(`
+            SELECT 
+                seq_no,
+                procedure_name,
+                procedure_desc,
+                service_id
+            FROM services_procedure
+            where service_id = $1
+            ORDER BY seq_no ASC`, [ServiceID])
+
+
+        if (!hiResult || !hiResult.rows || hiResult.rows.length === 0) {
             return res.status(404).json({ error: 'Hospital not found' });
         }
-        res.json(result.rows[0]); // send single hospital object back to the client
+
+        const servicesWithRequirements_Procedure = hiServicesResult.rows.map(service => ({
+            ...service,
+            Procedure: hiServicesProcedure.rows.filter(p => p.service_id=== service.service_id),
+            Requirements: hiServicesRequirements.rows.filter(r => r.service_id === service.service_id)
+        }));
+
+
+        res.json({
+            ...hiResult.rows[0],
+            Contacts_Details: hiContactDetailsResults.rows,
+            Services_Offered: servicesWithRequirements_Procedure
+        });
     } catch (err) {
         console.error('Error fetching hospital:', err);
         res.status(500).json({ error: 'Failed to fetch hospital' });
@@ -46,9 +109,14 @@ export async function get_hospital_info(req, res, next) {
 }
 
 /**
- * TODO: Validate input data before insertion and include also the description and the contact tables during insertion.
- * * SUGGESTION: Use transactions to ensure all related inserts succeed or fail together.
+ * 
+ * @param { Details of a health Institution [name, ophr, services offered, etc]} req 
+ * @param {status codes} res 
+ * @returns status code of 201
+ * 
+ * TODO NEXT TASK
  */
+
 export async function insert_hospital(req, res, next) {
 
     try {
