@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "test": "jest --runInBand --detectOpenHandles",
-    "start": "nodemon server.js"
+    "start": "nodemon server.js & cloudflared tunnel --url http://localhost:3000"
   },
   "repository": {
     "type": "git",

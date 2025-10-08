@@ -1,5 +1,7 @@
 import con from "../con.js";
 
+import arrayToJson from "../utils/converter/toJson.js";
+
 /**
  * 
  * get the list of the health Institution
@@ -74,8 +76,8 @@ export async function get_hospital_info(req, res, next) {
                 sr.service_id
             FROM service_requirements as sr 
             WHERE service_id = $1`, [ServiceID])
-        
-        const hiServicesProcedure =  await con.query(`
+
+        const hiServicesProcedure = await con.query(`
             SELECT 
                 seq_no,
                 procedure_name,
@@ -92,7 +94,7 @@ export async function get_hospital_info(req, res, next) {
 
         const servicesWithRequirements_Procedure = hiServicesResult.rows.map(service => ({
             ...service,
-            Procedure: hiServicesProcedure.rows.filter(p => p.service_id=== service.service_id),
+            Procedure: hiServicesProcedure.rows.filter(p => p.service_id === service.service_id),
             Requirements: hiServicesRequirements.rows.filter(r => r.service_id === service.service_id)
         }));
 
@@ -116,34 +118,75 @@ export async function get_hospital_info(req, res, next) {
  * 
  * TODO NEXT TASK
  */
-
 export async function insert_hospital(req, res, next) {
-
     try {
-        const { name, geo_latitude, geo_longhitude, city_zip_code, brgy_code, provincial_code, purok_code } = req.body;
+        const { name, geo_latitude, geo_longhitude, city_zip_code, brgy_code, provincial_code, prk_code, services, requirements,procedure } = req.body;
 
         if (!name || !geo_latitude || !geo_longhitude || !city_zip_code || !provincial_code) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        const result = await con.query(
-            `INSERT INTO health_insti (health_insti_name, geo_latitude, geo_longhitude, city_zip_code, brgy_code, provincial_code, purok_code) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;`,
-            [name, geo_latitude, geo_longhitude, city_zip_code, brgy_code, provincial_code, purok_code]
+        // Insert the hospital itself
+        const hospitalResult = await con.query(
+            `INSERT INTO health_insti (health_insti_name, geo_latitude, geo_longhitude, city_zip_code, brgy_code, provincial_code, purok_code)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING health_insti_id;`,
+            [name, geo_latitude, geo_longhitude, city_zip_code, brgy_code, provincial_code, prk_code]
         );
 
-        // return the inserted row and its primary key - adjust field name if your PK is `health_insti_id`
-        const inserted = result && result.rows && result.rows[0];
-        const insertedId = inserted ? (inserted.health_insti_id || inserted.id) : null;
+        const hospitalId = hospitalResult.rows[0].health_insti_id;
+
+        // Insert each service
+        if (Array.isArray(services) && services.length > 0) {
+            for (const { service_name, service_desc } of services) {
+                if (service_name && service_desc) {
+                    await con.query(
+                        `INSERT INTO health_insti_services (service_name, service_desc, health_insti_id)
+                         VALUES ($1, $2, $3);`,
+                        [service_name, service_desc, hospitalId]
+                    );
+                }
+
+
+                const serviceId = serviceResult.rows[0].id;
+
+                // Requirements
+                if (Array.isArray(requirements) && requirements.length > 0) {
+                    for (const { req_name, req_desc } of requirements) {
+                        await con.query(
+                            `INSERT INTO service_requirements (service_id, req_name, req_desc)
+                                VALUES ($1, $2, $3);`,
+                            [serviceId, req_name, req_desc]
+                        );
+                    }
+                }
+
+                // Procedures with sequence number
+                if (Array.isArray(procedure) && requiremenprocedurets.length > 0) {
+                    for (const [index, { procedure_name, procedure_desc }] of procedure.entries()) {
+                        const sequence_no = index + 1; // Start counting from 1 instead of 0
+                        await con.query(
+                            `INSERT INTO services_procedure (service_id, procedure_name, procedure_desc, sequence_no)
+                            VALUES ($1, $2, $3, $4);`,
+                            [serviceId, procedure_name, procedure_desc, sequence_no]
+                        );
+                    }
+                }
+
+                // Contact Details 
+                
+
+            }
+        }
+
         res.status(201).json({
-            message: 'Hospital added successfully',
-            hospital: inserted,
-            hospitalId: insertedId
+            message: "Hospital and services inserted successfully",
+            hospitalId
         });
 
     } catch (err) {
-        console.error('Error inserting hospital:', err);
-        res.status(500).json({ error: 'Failed to insert hospital' });
+        console.error("Error inserting hospital:", err);
+        res.status(500).json({ error: "Failed to insert hospital" });
     }
 }
 
